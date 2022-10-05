@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Store:etc/config.xsd">
+    <default>
+        <tax>
+            <avior_settings>
+                <enabled>0</enabled>
+                <endpoint>https://developer.tobtax.avior2.tax/</endpoint>
+                <log>1</log>
+                <seller_id>S00010022</seller_id>
+            </avior_settings>
+        </tax>
+    </default>
+</config>
