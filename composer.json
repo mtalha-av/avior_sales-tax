@@ -1,5 +1,5 @@
 {
-    "name": "avior/taxcalculation",
+    "name": "aviortax/suttax",
     "description": "Module to integrate with Avior Tax Service",
     "require": {
         "magento/framework": "103.0.*",
