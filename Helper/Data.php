@@ -9,6 +9,7 @@ use Magento\Bundle\Model\Product\Price;
 use Magento\Catalog\Model\Product\Type;
 use Magento\Config\Model\Config;
 use Magento\Directory\Model\RegionFactory;
+use Magento\Framework\App\Cache\Type\Collection as CacheCollection;
 use Magento\Framework\App\Helper\AbstractHelper;
 use Magento\Framework\App\Helper\Context;
 use Magento\Framework\Encryption\EncryptorInterface;
@@ -78,6 +79,11 @@ class Data extends AbstractHelper
     private $mapping = [];
 
     /**
+     * @var CacheCollection
+     */
+    private $collectionCache;
+
+    /**
      * @param Context $context
      * @param Config $configModel
      * @param Curl $curl
@@ -93,14 +99,16 @@ class Data extends AbstractHelper
         Json               $json,
         Logger             $logger,
         EncryptorInterface $encryptor,
-        RegionFactory      $regionFactory
+        RegionFactory      $regionFactory,
+        CacheCollection    $collectionCache
     ) {
-        $this->encryptor     = $encryptor;
-        $this->curl          = $curl;
-        $this->json          = $json;
-        $this->configModel   = $configModel;
-        $this->logger        = $logger;
-        $this->regionFactory = $regionFactory;
+        $this->encryptor       = $encryptor;
+        $this->curl            = $curl;
+        $this->json            = $json;
+        $this->configModel     = $configModel;
+        $this->logger          = $logger;
+        $this->regionFactory   = $regionFactory;
+        $this->collectionCache = $collectionCache;
         parent::__construct($context);
     }
 
@@ -320,6 +328,46 @@ class Data extends AbstractHelper
     }
 
     /**
+     * @param QuoteDetailsInterface $quoteTaxDetails
+     * @param $commonData
+     * @return array
+     */
+    private function getLineItemsforCache(
+        QuoteDetailsInterface $quoteTaxDetails
+    ) {
+        $lineItems = [];
+        $items     = $quoteTaxDetails->getItems();
+
+        if (count($items) > 0) {
+            $parentQuantities = [];
+
+            foreach ($items as $item) {
+                if ($item->getType() == 'product') {
+                    $id                  = $item->getCode();
+                    $parentId            = $item->getParentCode();
+                    $quantity            = $item->getQuantity();
+                    $extensionAttributes = $item->getExtensionAttributes();
+
+                    if ($extensionAttributes->getProductType() == Type::TYPE_BUNDLE) {
+                        $parentQuantities[$id] = $quantity;
+                        if ($extensionAttributes->getPriceType() == Price::PRICE_TYPE_DYNAMIC) {
+                            continue;
+                        }
+                    }
+                    if (isset($parentQuantities[$parentId])) {
+                        $quantity *= $parentQuantities[$parentId];
+                    }
+
+                    array_push($lineItems, [
+                        'amount of sale' => (string)($quantity * $item->getUnitPrice()),
+                    ]);
+                }
+            }
+        }
+        return $lineItems;
+    }
+
+    /**
      * @param Quote $quote
      * @param ShippingAssignmentInterface $shippingAssignment
      * @return array
@@ -377,8 +425,26 @@ class Data extends AbstractHelper
             $data       = $this->getLineItems($quoteTaxDetails, $commonData);
 
             if ($this->validateRequest($data)) {
-                $url      = $this->getEndpoint(self::ENDPOINT_FETCH_TAX);
-                $response = $this->postData($data, $url, true);
+                $url = $this->getEndpoint(self::ENDPOINT_FETCH_TAX);
+
+                $cacheId         = '_avior_';
+                $cacheCommonData = $commonData;
+                unset($cacheCommonData['date'], $cacheCommonData['record number']);
+                $cacheId   .= implode('', array_values($cacheCommonData));
+                $cacheData = $this->getLineItemsforCache($quoteTaxDetails);
+                foreach ($cacheData as &$item) {
+                    $item    = array_values($item);
+                    $cacheId .= implode('', $item);
+                }
+
+                $cachedResponse = $this->loadCache($cacheId);
+                if ($cachedResponse) {
+                    $response = $cachedResponse;
+                } else {
+                    $response = $this->postData($data, $url, true);
+                    $this->saveCache($response, $cacheId);
+
+                }
                 if ($this->isLogEnabled()) {
                     $this->logger->debug("--- fetchTax ---");
                     $this->logger->debug("fetchTax Request: " . $this->json->serialize($data));
@@ -409,7 +475,10 @@ class Data extends AbstractHelper
         $c = count($data);
 
         for ($i = 0; $i < $c; $i++) {
-            $diff = array_diff_assoc($data[$i], $response[$i]);
+            $dataToCheck = $data[$i];
+            unset($dataToCheck['date'], $dataToCheck['record number']);
+
+            $diff = array_diff_assoc($dataToCheck, $response[$i]);
             if (!empty($diff)) {
                 return false;
             }
@@ -552,5 +621,31 @@ class Data extends AbstractHelper
     public function getResponseShipping()
     {
         return [];
+    }
+
+    /**
+     * @param string $cacheId
+     * @return array
+     */
+    public function loadCache(string $cacheId): array
+    {
+        $cachedData = $this->collectionCache->load($cacheId) ?: '';
+
+        return empty($cachedData) ? [] : ($this->json->unserialize($cachedData) ?: []);
+    }
+
+    /**
+     * @param array $itemIds
+     * @param string $cacheId
+     * @return void
+     */
+    public function saveCache(array $itemIds, string $cacheId): void
+    {
+        $this->collectionCache->save(
+            $this->json->serialize($itemIds),
+            $cacheId,
+            [],
+            300
+        );
     }
 }

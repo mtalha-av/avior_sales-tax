@@ -8,6 +8,12 @@
                 <log>1</log>
                 <seller_id>S00010022</seller_id>
             </avior_settings>
+            <sales_display>
+                <full_summary>1</full_summary>
+            </sales_display>
+            <cart_display>
+                <full_summary>1</full_summary>
+            </cart_display>
         </tax>
     </default>
 </config>

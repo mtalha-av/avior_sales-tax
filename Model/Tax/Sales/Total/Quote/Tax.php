@@ -252,13 +252,26 @@ class Tax extends \Magento\Tax\Model\Sales\Total\Quote\Tax
 
             $jurisdictionRates = [];
             if ($taxCollectable) {
-                $jurisdictionRates = [
-                    'sales tax' => [
-                        'rate'   => (double)$taxCombinedRate,
-                        'amount' => (double)$taxCollectable,
-                        'id'     => $id,
-                    ],
-                ];
+                $i = 1;
+                while ($i <100){
+                    $key = 'fips jurisdiction code ' . $i;
+                    if (isset($lineItemTax[$key])){
+                        $rate = isset($lineItemTax['fips tax rate '.$i]) ? $lineItemTax['fips tax rate '.$i] : 0;
+                        $amount = isset($lineItemTax['fips tax amount '.$i]) ? $lineItemTax['fips tax amount '.$i] : 0;
+                        $code = isset($lineItemTax[$key]) ? $lineItemTax[$key] : '';
+
+                        $jurisdictionRates['sales tax ' . $i]=[
+                            'rate'   => (double)$rate,
+                            'amount' => (double)$amount,
+                            'code' => $code,
+                            'id'     => $code.$i,
+                        ];
+                    }
+                    else{
+                        break;
+                    }
+                    $i++;
+                }
             }
 
             $extensionAttributes->setJurisdictionTaxRates($jurisdictionRates);
