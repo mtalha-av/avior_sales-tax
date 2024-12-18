@@ -5,8 +5,7 @@ namespace Avior\TaxCalculation\Helper;
 use Avior\TaxCalculation\Logger\Logger;
 use DateTime;
 use Exception;
-use Magento\Bundle\Model\Product\Price;
-use Magento\Catalog\Model\Product\Type;
+use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Config\Model\Config;
 use Magento\Directory\Model\RegionFactory;
 use Magento\Framework\App\Cache\Type\Collection as CacheCollection;
@@ -27,16 +26,16 @@ use Magento\Tax\Api\Data\QuoteDetailsInterface;
  */
 class Data extends AbstractHelper
 {
-    const CONFIG_PATH_AVIOR_ENABLED   = 'tax/avior_settings/enabled';
-    const CONFIG_PATH_AVIOR_LOG       = 'tax/avior_settings/log';
-    const CONFIG_PATH_AVIOR_USERNAME  = 'tax/avior_settings/username';
+    const CONFIG_PATH_AVIOR_ENABLED = 'tax/avior_settings/enabled';
+    const CONFIG_PATH_AVIOR_LOG = 'tax/avior_settings/log';
+    const CONFIG_PATH_AVIOR_USERNAME = 'tax/avior_settings/username';
     const CONFIG_PATH_AVIOR_SELLER_ID = 'tax/avior_settings/seller_id';
-    const CONFIG_PATH_AVIOR_PASSWORD  = 'tax/avior_settings/password';
-    const CONFIG_PATH_AVIOR_ENDPOINT  = 'tax/avior_settings/endpoint';
-    const CONFIG_PATH_IS_CONNECTED    = 'tax/avior_settings/is_connected';
-    const CONFIG_PATH_AVIOR_TOKEN     = 'tax/avior_settings/token';
-    const ENDPOINT_LOGIN              = 'api/auth/token/login';
-    const ENDPOINT_FETCH_TAX          = 'suttaxd/gettax/';
+    const CONFIG_PATH_AVIOR_PASSWORD = 'tax/avior_settings/password';
+    const CONFIG_PATH_AVIOR_ENDPOINT = 'tax/avior_settings/endpoint';
+    const CONFIG_PATH_IS_CONNECTED = 'tax/avior_settings/is_connected';
+    const CONFIG_PATH_AVIOR_TOKEN = 'tax/avior_settings/token';
+    const ENDPOINT_LOGIN = 'api/auth/token/login';
+    const ENDPOINT_FETCH_TAX = 'suttaxd/gettax/';
 
     /**
      * @var Curl
@@ -84,6 +83,11 @@ class Data extends AbstractHelper
     private $collectionCache;
 
     /**
+     * @var ProductRepositoryInterface
+     */
+    private $productRepository;
+
+    /**
      * @param Context $context
      * @param Config $configModel
      * @param Curl $curl
@@ -91,24 +95,29 @@ class Data extends AbstractHelper
      * @param Logger $logger
      * @param EncryptorInterface $encryptor
      * @param RegionFactory $regionFactory
+     * @param CacheCollection $collectionCache
+     * @param ProductRepositoryInterface $productRepository
      */
     public function __construct(
-        Context            $context,
-        Config             $configModel,
-        Curl               $curl,
-        Json               $json,
-        Logger             $logger,
-        EncryptorInterface $encryptor,
-        RegionFactory      $regionFactory,
-        CacheCollection    $collectionCache
-    ) {
-        $this->encryptor       = $encryptor;
-        $this->curl            = $curl;
-        $this->json            = $json;
-        $this->configModel     = $configModel;
-        $this->logger          = $logger;
-        $this->regionFactory   = $regionFactory;
-        $this->collectionCache = $collectionCache;
+        Context                    $context,
+        Config                     $configModel,
+        Curl                       $curl,
+        Json                       $json,
+        Logger                     $logger,
+        EncryptorInterface         $encryptor,
+        RegionFactory              $regionFactory,
+        CacheCollection            $collectionCache,
+        ProductRepositoryInterface $productRepository,
+    )
+    {
+        $this->encryptor         = $encryptor;
+        $this->curl              = $curl;
+        $this->json              = $json;
+        $this->configModel       = $configModel;
+        $this->logger            = $logger;
+        $this->regionFactory     = $regionFactory;
+        $this->collectionCache   = $collectionCache;
+        $this->productRepository = $productRepository;
         parent::__construct($context);
     }
 
@@ -236,9 +245,9 @@ class Data extends AbstractHelper
     {
         $options  = array(
             'http' => array(
-                'method'  => 'POST',
+                'method' => 'POST',
                 'content' => $this->json->serialize($data),
-                'header'  => "Content-Type: application/json\r\n" .
+                'header' => "Content-Type: application/json\r\n" .
                     "Accept: application/json\r\n" . ($needToken ? ("Authorization: Token " . $this->getToken()) : '')
             )
         );
@@ -293,34 +302,28 @@ class Data extends AbstractHelper
     private function getLineItems(
         QuoteDetailsInterface $quoteTaxDetails,
                               $commonData
-    ) {
+    )
+    {
         $lineItems = [];
         $items     = $quoteTaxDetails->getItems();
 
         if (count($items) > 0) {
-            $parentQuantities = [];
-
             foreach ($items as $item) {
                 if ($item->getType() == 'product') {
-                    $id                  = $item->getCode();
-                    $parentId            = $item->getParentCode();
-                    $quantity            = $item->getQuantity();
-                    $extensionAttributes = $item->getExtensionAttributes();
-
-                    if ($extensionAttributes->getProductType() == Type::TYPE_BUNDLE) {
-                        $parentQuantities[$id] = $quantity;
-                        if ($extensionAttributes->getPriceType() == Price::PRICE_TYPE_DYNAMIC) {
-                            continue;
-                        }
+                    $id       = $item->getCode();
+                    $parentId = $item->getParentCode();
+                    $quantity = $item->getQuantity();
+                    $model    = $this->productRepository->get($item->getSku());
+                    if ($parentId) {
+                        unset($this->mapping[$parentId]);
+                        unset($lineItems[$parentId]);
                     }
-                    if (isset($parentQuantities[$parentId])) {
-                        $quantity *= $parentQuantities[$parentId];
-                    }
-
-                    $this->mapping[$item->getCode()] = array_push($lineItems, array_merge($commonData, [
-                            'sku'            => (string)$item->getSku(),
-                            'amount of sale' => (string)($quantity * $item->getUnitPrice()),
-                        ])) - 1;
+                    $lineItems[$id]     = array_merge($commonData, [
+                        'sku' => (string)$item->getSku(),
+                        'amount of sale' => (string)($quantity * $item->getUnitPrice()),
+                        'description' => (string)$model->getName(),
+                    ]);
+                    $this->mapping[$id] = count($lineItems) - 1;
                 }
             }
         }
@@ -334,33 +337,28 @@ class Data extends AbstractHelper
      */
     private function getLineItemsforCache(
         QuoteDetailsInterface $quoteTaxDetails
-    ) {
+    )
+    {
         $lineItems = [];
         $items     = $quoteTaxDetails->getItems();
 
         if (count($items) > 0) {
-            $parentQuantities = [];
-
             foreach ($items as $item) {
                 if ($item->getType() == 'product') {
-                    $id                  = $item->getCode();
-                    $parentId            = $item->getParentCode();
-                    $quantity            = $item->getQuantity();
-                    $extensionAttributes = $item->getExtensionAttributes();
+                    $id       = $item->getCode();
+                    $parentId = $item->getParentCode();
+                    $quantity = $item->getQuantity();
+                    $model    = $this->productRepository->get($item->getSku());
 
-                    if ($extensionAttributes->getProductType() == Type::TYPE_BUNDLE) {
-                        $parentQuantities[$id] = $quantity;
-                        if ($extensionAttributes->getPriceType() == Price::PRICE_TYPE_DYNAMIC) {
-                            continue;
-                        }
+                    if ($parentId) {
+                        unset($this->mapping[$parentId]);
+                        unset($lineItems[$parentId]);
                     }
-                    if (isset($parentQuantities[$parentId])) {
-                        $quantity *= $parentQuantities[$parentId];
-                    }
-
-                    array_push($lineItems, [
+                    $lineItems[$id] = [
+                        'sku' => (string)$item->getSku(),
                         'amount of sale' => (string)($quantity * $item->getUnitPrice()),
-                    ]);
+                        'description' => (string)$model->getName(),
+                    ];
                 }
             }
         }
@@ -377,12 +375,12 @@ class Data extends AbstractHelper
         ShippingAssignmentInterface $shippingAssignment)
     {
         $address          = $shippingAssignment->getShipping()->getAddress();
-        $shippingRegionId = $this->scopeConfig->getValue('shipping/origin/region_id',
+        $shippingRegionId = $orderReceivedState = $this->scopeConfig->getValue('shipping/origin/region_id',
             ScopeInterface::SCOPE_STORE,
             $quote->getStoreId()
         );
 
-        $postCode = explode('-', $address->getPostcode());
+        $postCode = explode('-', (string)$address->getPostcode());
         if (count($postCode) > 1) {
             $zipCode     = $postCode[0];
             $zipCodePlus = $postCode[1];
@@ -390,21 +388,56 @@ class Data extends AbstractHelper
             $zipCode     = $postCode[0];
             $zipCodePlus = "";
         }
+
+        $orderReceivedAddress = $this->scopeConfig->getValue('shipping/origin/street_line1',
+                ScopeInterface::SCOPE_STORE,
+                $quote->getStoreId()
+            ) . $this->scopeConfig->getValue('shipping/origin/street_line2',
+                ScopeInterface::SCOPE_STORE,
+                $quote->getStoreId()
+            );
+
+        $orderReceivedCity = $this->scopeConfig->getValue('shipping/origin/city',
+            ScopeInterface::SCOPE_STORE,
+            $quote->getStoreId()
+        );
+
+        $orderReceivedPostCode = explode('-', (string)$this->scopeConfig->getValue('shipping/origin/postcode',
+            ScopeInterface::SCOPE_STORE,
+            $quote->getStoreId()
+        ));
+        if (count($orderReceivedPostCode) > 1) {
+            $orderReceivedZipCode     = $orderReceivedPostCode[0];
+            $orderReceivedZipCodePlus = $orderReceivedPostCode[1];
+        } else {
+            $orderReceivedZipCode     = $orderReceivedPostCode[0];
+            $orderReceivedZipCodePlus = "";
+        }
+
         return [
-            'date'                 => empty($quote->getUpdatedAt()) ? date('Ymd') : DateTime::createFromFormat('Y-m-d H:i:s', $quote->getUpdatedAt())->format('Ymd'),
-            'record number'        => (string)rand(111111, 999999),
-            'seller id'            => $this->getSellerId(),
-            'seller location id'   => '1',//todo
-            'seller state'         => trim($this->regionFactory->create()->load($shippingRegionId)->getCode()),
-            'delivery method'      => 'N',//todo Y or N
+            'date' => empty($quote->getUpdatedAt()) ? date('Ymd') : DateTime::createFromFormat('Y-m-d H:i:s', $quote->getUpdatedAt())->format('Ymd'),
+            'record number' => (string)rand(111111, 999999),
+            'seller id' => $this->getSellerId(),
+            'seller location id' => '1',//todo
+            'seller state' => trim((string)$this->regionFactory->create()->load($shippingRegionId)->getCode()),
+            'delivery method' => 'N',//todo Y or N
             'customer entity code' => 'T',//todo T or E
-            'ship to address'      => trim($address->getData('street')),
-            'ship to suite'        => '',//todo
-            'ship to city'         => trim($address->getCity()),
-            'ship to county'       => trim($address->getCounty()),
-            'ship to state'        => trim($address->getRegionCode()),
-            'ship to zip code'     => trim($zipCode),
-            'ship to zip plus'     => trim($zipCodePlus)
+            'order received address' => trim((string)$orderReceivedAddress),
+            'order received suite' => '',//todo
+            'order received city' => trim((string)$orderReceivedCity),
+            'order received county' => '',//todo
+            'order received state' => trim((string)$this->regionFactory->create()->load($orderReceivedState)->getCode()),
+            'order received zip code' => trim((string)$orderReceivedZipCode),
+            'order received zip plus' => trim((string)$orderReceivedZipCodePlus),
+            'ship to address' => trim((string)$address->getData('street')),
+            'ship to suite' => '',//todo
+            'ship to city' => trim((string)$address->getCity()),
+            'ship to county' => trim($address->getCounty() ? (string)$address->getCounty() : ''),
+            'ship to state' => trim((string)$address->getRegionCode()),
+            'ship to zip code' => trim((string)$zipCode),
+            'ship to zip plus' => trim((string)$zipCodePlus),
+            'transaction number' => 'ID_' . $quote->getId(),
+            'document type' => ''
         ];
     }
 
@@ -423,6 +456,7 @@ class Data extends AbstractHelper
         try {
             $commonData = $this->getCommonData($quote, $shippingAssignment);
             $data       = $this->getLineItems($quoteTaxDetails, $commonData);
+            $data       = array_values($data);
 
             if ($this->validateRequest($data)) {
                 $url = $this->getEndpoint(self::ENDPOINT_FETCH_TAX);
@@ -443,7 +477,6 @@ class Data extends AbstractHelper
                 } else {
                     $response = $this->postData($data, $url, true);
                     $this->saveCache($response, $cacheId);
-
                 }
                 if ($this->isLogEnabled()) {
                     $this->logger->debug("--- fetchTax ---");
@@ -476,7 +509,7 @@ class Data extends AbstractHelper
 
         for ($i = 0; $i < $c; $i++) {
             $dataToCheck = $data[$i];
-            unset($dataToCheck['date'], $dataToCheck['record number']);
+            unset($dataToCheck['customer entity code'], $dataToCheck['date'], $dataToCheck['record number']);
 
             $diff = array_diff_assoc($dataToCheck, $response[$i]);
             if (!empty($diff)) {
@@ -492,14 +525,14 @@ class Data extends AbstractHelper
      */
     private function validateRequest($data)
     {
-        $reqValid     = true;
-        $fieldCounter = 0;
+        $reqValid = true;
 
-        $fields = array('date', 'record number', 'seller id', 'seller location id', 'seller state', 'delivery method', 'customer entity code', 'ship to address', 'ship to suite', 'ship to city', 'ship to county', 'ship to state', 'ship to zip code', 'sku', 'amount of sale');
+        $fields = array('order received address', 'order received suite', 'order received city', 'order received county', 'order received state', 'order received zip code', 'order received zip plus', 'date', 'record number', 'seller id', 'seller location id', 'seller state', 'delivery method', 'customer entity code', 'ship to address', 'ship to suite', 'ship to city', 'ship to county', 'ship to state', 'ship to zip code', 'sku', 'amount of sale');
 
         foreach ($data as $item) {
             #Validates all expected fields are present in the request and values are correct
             foreach ($item as $key => $value) {
+                $fieldCounter = 0;
                 if (in_array($key, $fields)) {
                     $fieldCounter++;
 
@@ -548,7 +581,7 @@ class Data extends AbstractHelper
                         }
                         case "ship to address":
                         {
-                            if (empty($item["ship to address"]) || !ctype_alnum(trim(str_replace(' ', '', $item["ship to address"])))) {
+                            if (empty($item["ship to address"]) || !ctype_alnum(trim(str_replace(' ', '', str_replace("\n", ' ', $item["ship to address"]))))) {
                                 $reqValid = false;
                             }
                         }
@@ -576,6 +609,36 @@ class Data extends AbstractHelper
                                 $reqValid = false;
                             }
                         }
+                        case "order received address":
+                        {
+                            if (empty($item["order received address"]) || !ctype_alnum(trim(str_replace(' ', '', $item["order received address"])))) {
+                                $reqValid = false;
+                            }
+                        }
+                        case "order received city":
+                        {
+                            if (empty($item["order received city"]) || !is_string($item["order received city"])) {
+                                $reqValid = false;
+                            }
+                        }
+                        case "order received county":
+                        {
+                            if (!empty($item["order received county"]) && !is_string($item["order received county"])) {
+                                $reqValid = false;
+                            }
+                        }
+                        case "order received state":
+                        {
+                            if (empty($item["order received state"]) || !is_string($item["order received state"])) {
+                                $reqValid = false;
+                            }
+                        }
+                        case "order received zip code":
+                        {
+                            if (empty($item["order received zip code"]) || !is_numeric($item["order received zip code"])) {
+                                $reqValid = false;
+                            }
+                        }
                         case "sku":
                         {
                             if (empty($item["sku"])) {
@@ -590,10 +653,15 @@ class Data extends AbstractHelper
                         }
                     }
                 }
+
+                if ($fieldCounter == 24) {
+                    $reqValid = false;
+                }
+
+                if ($reqValid == false) {
+                    return false;
+                }
             }
-        }
-        if ($fieldCounter == 16) {
-            $reqValid = false;
         }
 
         #Return true or false

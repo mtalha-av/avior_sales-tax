@@ -1,6 +1,11 @@
 # Change Log
 All notable changes to this project will be documented in this file.
 
+## 1.2.0 - 2024-11-12
+- Update new api parameters
+- Bug fixing
+- Latest version supported
+
 ## 1.1.0 - 2022-10-27
 - Add Tax rate and amount detailed display in Cart, checkout.
 - Add caching algorithm for better performance.

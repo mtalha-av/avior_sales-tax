@@ -1,14 +1,14 @@
 {
-    "name": "aviortax/suttax-magento",
+    "name": "avior/taxcalculation",
     "description": "Module to integrate with Avior Tax Service",
     "require": {
         "magento/framework": "103.0.*",
-        "php": "~7.4.0||~8.1.0"
+        "php": "~7.4.0||~8.1.0||~8.2.0"
     },
     "type": "magento2-module",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "license": [
-        "OSL-3.0"
+        "Proprietary"
     ],
     "autoload": {
         "files": [
